@@ -95,17 +95,28 @@ self.addEventListener('push', (event) => {
     silent: false,
   };
 
-  // Try to parse the push data
-  try {
-    if (event.data) {
+  // Try to parse the push data - handle both JSON and plain text
+  if (event.data) {
+    try {
+      // Try parsing as JSON first
       const pushData = event.data.json();
       notificationData = {
         ...notificationData,
         ...pushData,
       };
+      console.log('[SW] Parsed JSON push data:', pushData);
+    } catch (jsonError) {
+      // If JSON parsing fails, try as plain text
+      try {
+        const textData = event.data.text();
+        if (textData) {
+          notificationData.body = textData;
+          console.log('[SW] Using text data as notification body:', textData);
+        }
+      } catch (textError) {
+        console.error('[SW] Error reading push data:', textError);
+      }
     }
-  } catch (e) {
-    console.error('[SW] Error parsing push data:', e);
   }
 
   // iOS doesn't support all notification options
