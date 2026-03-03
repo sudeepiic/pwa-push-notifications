@@ -158,12 +158,18 @@ export default function Home() {
         </div>
 
         {/* Debug Link */}
-        <div className="text-center">
+        <div className="text-center space-x-4">
           <a
             href="/debug"
             className="text-xs text-gray-500 hover:text-gray-400 underline"
           >
             Debug Console
+          </a>
+          <a
+            href="/clean"
+            className="text-xs text-gray-500 hover:text-gray-400 underline"
+          >
+            Clean Service Workers
           </a>
         </div>
       </div>
