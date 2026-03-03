@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { subscriptions, webpush } from '../subscribe/route';
+import { storage } from '@/lib/storage/subscriptions';
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,45 +16,23 @@ export async function POST(request: NextRequest) {
       },
     };
 
-    let successCount = 0;
-    let failureCount = 0;
-    const errors: string[] = [];
-
-    // Send notification to all subscribers
-    for (const [endpoint, subscription] of subscriptions.entries()) {
-      try {
-        await webpush.sendNotification(
-          subscription,
-          JSON.stringify(notificationPayload)
-        );
-        successCount++;
-      } catch (error: any) {
-        failureCount++;
-        errors.push(`${endpoint}: ${error.message}`);
-
-        // Remove invalid subscriptions
-        if (error.statusCode === 404 || error.statusCode === 410) {
-          subscriptions.delete(endpoint);
-          console.log('[API] Removed invalid subscription:', endpoint);
-        }
-      }
-    }
+    const results = await storage.broadcast(notificationPayload);
 
     console.log('[API] Trigger notification sent:', {
-      successCount,
-      failureCount,
-      totalSubscribers: subscriptions.size,
+      sent: results.sent,
+      failed: results.failed,
+      total: storage.count(),
     });
 
     return NextResponse.json({
       success: true,
       message: 'Notification sent to all subscribers',
       stats: {
-        sent: successCount,
-        failed: failureCount,
-        total: subscriptions.size,
+        sent: results.sent,
+        failed: results.failed,
+        total: storage.count(),
       },
-      errors: errors.length > 0 ? errors : undefined,
+      errors: results.errors.length > 0 ? results.errors : undefined,
     });
 
   } catch (error) {

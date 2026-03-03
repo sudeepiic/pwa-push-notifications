@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { subscriptions } from '../subscribe/route';
+import { storage } from '@/lib/storage/subscriptions';
 
 export async function DELETE(request: NextRequest) {
   try {
@@ -13,14 +13,12 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Remove the subscription
-    const deleted = subscriptions.delete(endpoint);
-
-    console.log('[API] Subscription removed:', endpoint);
+    const deleted = storage.remove(endpoint);
 
     return NextResponse.json({
       success: deleted,
       message: deleted ? 'Subscription removed successfully' : 'Subscription not found',
-      remainingSubscriptions: subscriptions.size,
+      remainingSubscriptions: storage.count(),
     });
 
   } catch (error) {

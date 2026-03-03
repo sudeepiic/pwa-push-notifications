@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { subscriptions, webpush } from '../subscribe/route';
+import { storage } from '@/lib/storage/subscriptions';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,32 +17,12 @@ export async function POST(request: NextRequest) {
       },
     };
 
-    let successCount = 0;
-    let failureCount = 0;
-
-    // Send notification to all subscribers
-    for (const [endpoint, subscription] of subscriptions.entries()) {
-      try {
-        await webpush.sendNotification(
-          subscription,
-          JSON.stringify(notificationPayload)
-        );
-        successCount++;
-      } catch (error: any) {
-        failureCount++;
-
-        // Remove invalid subscriptions (410 = Gone, 404 = Not Found)
-        if (error.statusCode === 404 || error.statusCode === 410) {
-          subscriptions.delete(endpoint);
-          console.log('[API] Removed invalid subscription:', endpoint);
-        }
-      }
-    }
+    const results = await storage.broadcast(notificationPayload);
 
     console.log('[API] Broadcast notification sent:', {
-      successCount,
-      failureCount,
-      totalSubscribers: subscriptions.size,
+      sent: results.sent,
+      failed: results.failed,
+      total: storage.count(),
       timestamp: new Date().toISOString(),
     });
 
@@ -50,9 +30,9 @@ export async function POST(request: NextRequest) {
       success: true,
       message: 'Broadcast sent successfully',
       stats: {
-        sent: successCount,
-        failed: failureCount,
-        total: subscriptions.size,
+        sent: results.sent,
+        failed: results.failed,
+        total: storage.count(),
       },
     });
 
@@ -80,33 +60,14 @@ export async function GET() {
       },
     };
 
-    let successCount = 0;
-    let failureCount = 0;
-
-    // Send notification to all subscribers
-    for (const [endpoint, subscription] of subscriptions.entries()) {
-      try {
-        await webpush.sendNotification(
-          subscription,
-          JSON.stringify(notificationPayload)
-        );
-        successCount++;
-      } catch (error: any) {
-        failureCount++;
-
-        // Remove invalid subscriptions
-        if (error.statusCode === 404 || error.statusCode === 410) {
-          subscriptions.delete(endpoint);
-        }
-      }
-    }
+    const results = await storage.broadcast(notificationPayload);
 
     return NextResponse.json({
       success: true,
       stats: {
-        sent: successCount,
-        failed: failureCount,
-        total: subscriptions.size,
+        sent: results.sent,
+        failed: results.failed,
+        total: storage.count(),
       },
     });
 
