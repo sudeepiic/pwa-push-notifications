@@ -7,7 +7,7 @@ export default function Home() {
   const [isIOS, setIsIOS] = useState(false);
   const [isAndroid, setIsAndroid] = useState(false);
   const [isMacOS, setIsMacOS] = useState(false);
-  const [isMacOS Safari, setIsMacOSSafari] = useState(false);
+  const [isMacOSSafari, setIsMacOSSafari] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIOSPrompt, setShowIOSPrompt] = useState(false);
 
