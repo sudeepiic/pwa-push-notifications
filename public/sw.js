@@ -1,76 +1,77 @@
 const CACHE_NAME = 'pwa-push-notifications-v1';
-const urlsToCache = [
-  '/',
-  '/manifest.json',
-  '/icon-192x192.png',
-  '/icon-512x512.png',
-  '/apple-touch-icon.png',
-];
 
-// Install event - cache resources
+// Install event - basic setup
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => {
-        console.log('[SW] Caching app shell');
-        return cache.addAll(urlsToCache);
-      })
-      .catch((error) => {
-        console.error('[SW] Cache installation failed:', error);
-      })
-  );
+  console.log('[SW] Installing service worker...');
   self.skipWaiting();
 });
 
 // Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
+  console.log('[SW] Activating service worker...');
   event.waitUntil(
-    caches.keys()
-      .then((cacheNames) => {
-        return Promise.all(
-          cacheNames.map((cacheName) => {
-            if (cacheName !== CACHE_NAME) {
-              console.log('[SW] Deleting old cache:', cacheName);
-              return caches.delete(cacheName);
-            }
-          })
-        );
-      })
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          // Keep current cache, remove old ones
+          if (cacheName !== CACHE_NAME) {
+            console.log('[SW] Deleting old cache:', cacheName);
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    })
   );
   self.clients.claim();
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event - network first, fallback to cache
 self.addEventListener('fetch', (event) => {
+  // Skip non-GET requests
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  // Skip cross-origin requests
+  if (!event.request.url.startsWith(self.location.origin)) {
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request)
+    fetch(event.request)
       .then((response) => {
-        // Cache hit - return response
-        if (response) {
+        // Don't cache non-successful responses
+        if (!response || response.status !== 200 || response.type !== 'basic') {
           return response;
         }
 
-        // Clone the request
-        const fetchRequest = event.request.clone();
+        // Clone the response
+        const responseToCache = response.clone();
 
-        return fetch(fetchRequest).then((response) => {
-          // Check if valid response
-          if (!response || response.status !== 200 || response.type !== 'basic') {
-            return response;
+        // Cache successful responses
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put(event.request, responseToCache).catch(() => {
+            // Silently fail if caching fails
+            console.debug('[SW] Could not cache:', event.request.url);
+          });
+        });
+
+        return response;
+      })
+      .catch(() => {
+        // If network fails, try cache
+        return caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) {
+            console.log('[SW] Serving from cache:', event.request.url);
+            return cachedResponse;
           }
-
-          // Clone the response
-          const responseToCache = response.clone();
-
-          caches.open(CACHE_NAME)
-            .then((cache) => {
-              cache.put(event.request, responseToCache);
+          // Return a basic offline response for HTML requests
+          if (event.request.headers.get('accept')?.includes('text/html')) {
+            return new Response('Offline - Please check your connection', {
+              status: 503,
+              headers: { 'Content-Type': 'text/plain' }
             });
-
-          return response;
-        }).catch((error) => {
-          console.error('[SW] Fetch failed:', error);
-          // You can return a custom offline page here
+          }
         });
       })
   );
@@ -78,7 +79,7 @@ self.addEventListener('fetch', (event) => {
 
 // Push event - handle incoming push notifications
 self.addEventListener('push', (event) => {
-  console.log('[SW] Push event received');
+  console.log('[SW] Push event received at:', new Date().toLocaleString());
 
   let notificationData = {
     title: 'PWA Push Notification',
@@ -90,7 +91,7 @@ self.addEventListener('push', (event) => {
       url: '/',
       timestamp: Date.now(),
     },
-    tag: 'pwa-push-notification',
+    tag: `pwa-push-${Date.now()}`,
     requireInteraction: false,
     silent: false,
   };
@@ -104,14 +105,14 @@ self.addEventListener('push', (event) => {
         ...notificationData,
         ...pushData,
       };
-      console.log('[SW] Parsed JSON push data:', pushData);
+      console.log('[SW] Parsed JSON push data');
     } catch (jsonError) {
       // If JSON parsing fails, try as plain text
       try {
         const textData = event.data.text();
         if (textData) {
           notificationData.body = textData;
-          console.log('[SW] Using text data as notification body:', textData);
+          console.log('[SW] Using text data as notification body');
         }
       } catch (textError) {
         console.error('[SW] Error reading push data:', textError);
@@ -119,23 +120,31 @@ self.addEventListener('push', (event) => {
     }
   }
 
-  // iOS doesn't support all notification options
-  // We need to simplify for iOS compatibility
-  const iosNotificationData = {
+  // Simplified notification data for better compatibility
+  const simplifiedNotification = {
     title: notificationData.title,
     body: notificationData.body,
     icon: notificationData.icon,
+    badge: notificationData.badge,
     data: notificationData.data,
+    tag: notificationData.tag,
   };
 
   event.waitUntil(
-    self.registration.showNotification(notificationData.title, notificationData)
+    self.registration.showNotification(simplifiedNotification.title, simplifiedNotification)
+      .then(() => {
+        console.log('[SW] Notification shown successfully');
+      })
       .catch((error) => {
         console.error('[SW] Error showing notification:', error);
-        // Fallback for iOS - try with simplified options
+        // Try with minimal options
         return self.registration.showNotification(
-          iosNotificationData.title,
-          iosNotificationData
+          simplifiedNotification.title,
+          {
+            title: simplifiedNotification.title,
+            body: simplifiedNotification.body,
+            icon: simplifiedNotification.icon,
+          }
         );
       })
   );
@@ -143,14 +152,14 @@ self.addEventListener('push', (event) => {
 
 // Notification click event
 self.addEventListener('notificationclick', (event) => {
-  console.log('[SW] Notification click received');
+  console.log('[SW] Notification clicked');
 
   event.notification.close();
 
   const urlToOpen = event.notification.data?.url || '/';
 
   event.waitUntil(
-    clients.matchAll({ type: 'window' })
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then((clientList) => {
         // Check if a window is already open
         for (const client of clientList) {
@@ -167,18 +176,6 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// Sync event - for background sync (if needed)
-self.addEventListener('sync', (event) => {
-  console.log('[SW] Sync event:', event.tag);
-
-  if (event.tag === 'sync-notifications') {
-    event.waitUntil(
-      // Handle background sync here
-      Promise.resolve()
-    );
-  }
-});
-
 // Handle messages from clients
 self.addEventListener('message', (event) => {
   console.log('[SW] Message received:', event.data);
@@ -188,4 +185,4 @@ self.addEventListener('message', (event) => {
   }
 });
 
-console.log('[SW] Service Worker loaded');
+console.log('[SW] Service Worker loaded at:', new Date().toLocaleString());
