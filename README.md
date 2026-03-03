@@ -1,13 +1,15 @@
 # PWA Push Notifications
 
-A Progressive Web App (PWA) with push notification support that works on both iOS (16.4+) and Android. The app sends push notifications every 10 seconds.
+A Progressive Web App (PWA) with push notification support that works on iOS (16.4+), Android, and desktop browsers (Chrome, Edge, Firefox). The app sends push notifications every 10 seconds.
 
 ## Features
 
 - ✅ PWA with offline support
 - ✅ Push notifications every 10 seconds
-- ✅ iOS 16.4+ support
+- ✅ iOS 16.4+ support (home screen install required)
 - ✅ Android support
+- ✅ macOS Chrome/Edge/Firefox support
+- ❌ macOS Safari NOT supported (Web Push API not available)
 - ✅ VAPID authentication for secure push
 - ✅ Service Worker for background handling
 - ✅ Responsive design with Tailwind CSS

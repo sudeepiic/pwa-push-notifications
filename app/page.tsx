@@ -5,13 +5,31 @@ import PushNotificationManager from '@/components/PushNotificationManager';
 
 export default function Home() {
   const [isIOS, setIsIOS] = useState(false);
+  const [isAndroid, setIsAndroid] = useState(false);
+  const [isMacOS, setIsMacOS] = useState(false);
+  const [isMacOS Safari, setIsMacOSSafari] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIOSPrompt, setShowIOSPrompt] = useState(false);
 
   useEffect(() => {
-    // Detect iOS
+    // Detect iOS (mobile)
     const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent);
     setIsIOS(isIOSDevice);
+
+    // Detect Android
+    const isAndroidDevice = /Android/.test(navigator.userAgent);
+    setIsAndroid(isAndroidDevice);
+
+    // Detect macOS
+    const isMacOSDevice = /Macintosh|MacIntel|MacPPC|Mac68K/.test(navigator.userAgent);
+    setIsMacOS(isMacOSDevice);
+
+    // Detect Safari browser
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
+    // macOS Safari combination
+    const isMacOSSafariBrowser = isMacOSDevice && isSafari && !isIOSDevice;
+    setIsMacOSSafari(isMacOSSafariBrowser);
 
     // Detect if running in standalone mode (added to home screen)
     const isStandaloneMode = (window.navigator as any).standalone === true ||
@@ -67,6 +85,27 @@ export default function Home() {
           </div>
         )}
 
+        {/* macOS Safari Warning */}
+        {isMacOSSafari && (
+          <div className="bg-red-600/20 border border-red-500/30 rounded-xl p-4 space-y-3">
+            <h3 className="font-semibold text-red-400">⚠️ macOS Safari Not Supported</h3>
+            <p className="text-sm text-gray-300">
+              macOS Safari does not support PWA push notifications.
+            </p>
+            <p className="text-sm text-gray-300">
+              Please use one of these browsers on macOS:
+            </p>
+            <ul className="text-sm text-gray-300 space-y-1 list-disc list-inside">
+              <li><strong>Google Chrome</strong> - Full support</li>
+              <li><strong>Microsoft Edge</strong> - Full support</li>
+              <li><strong>Firefox</strong> - Full support</li>
+            </ul>
+            <p className="text-xs text-gray-400 mt-2">
+              Note: PWA push notifications are only supported on iOS 16.4+, not macOS.
+            </p>
+          </div>
+        )}
+
         {/* Status Badge */}
         <div className="flex justify-center">
           {isStandalone ? (
@@ -103,15 +142,19 @@ export default function Home() {
           <ul className="text-sm text-gray-400 space-y-1">
             <li>• Subscribe to enable push notifications</li>
             <li>• Notifications are sent every 10 seconds</li>
-            <li>• Works on iOS 16.4+ and Android</li>
-            <li>• Requires HTTPS and home screen install on iOS</li>
+            <li>• <strong>iOS 16.4+:</strong> Requires home screen install</li>
+            <li>• <strong>Android:</strong> Works directly in Chrome</li>
+            <li>• <strong>macOS:</strong> Use Chrome/Edge/Firefox (not Safari)</li>
           </ul>
         </div>
 
         {/* Platform Info */}
         <div className="text-center text-xs text-gray-500">
           {isIOS && <span>iOS {navigator.userAgent.match(/OS (\d+)_(\d+)/)?.[1] || '16.4+'} detected</span>}
-          {!isIOS && <span>Android/Desktop detected</span>}
+          {isAndroid && <span>Android detected</span>}
+          {isMacOSSafari && <span>macOS Safari detected (push not supported)</span>}
+          {isMacOS && !isMacOSSafari && <span>macOS detected (using compatible browser)</span>}
+          {!isIOS && !isAndroid && !isMacOS && <span>Desktop detected</span>}
         </div>
       </div>
     </main>

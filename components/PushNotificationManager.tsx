@@ -26,10 +26,24 @@ export default function PushNotificationManager() {
   const [error, setError] = useState<string | null>(null);
   const [lastNotification, setLastNotification] = useState<Date | null>(null);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [isMacOSSafari, setIsMacOSSafari] = useState(false);
+  const [isPushSupported, setIsPushSupported] = useState(true);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Check initial subscription status
+  // Check initial subscription status and platform
   useEffect(() => {
+    // Detect macOS Safari
+    const isMacOS = /Macintosh|MacIntel|MacPPC|Mac68K/.test(navigator.userAgent);
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    const isIOSSafari = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isMacOSSafariBrowser = isMacOS && isSafari && !isIOSSafari;
+
+    setIsMacOSSafari(isMacOSSafariBrowser);
+
+    // Check if push is supported
+    const supported = 'serviceWorker' in navigator && 'PushManager' in window && Notification.permission !== 'denied';
+    setIsPushSupported(supported);
+
     checkSubscriptionStatus();
 
     // Listen for permission changes
@@ -295,14 +309,26 @@ export default function PushNotificationManager() {
         {/* Action Buttons */}
         <div className="space-y-3">
           {!status.subscribed ? (
-            <button
-              onClick={subscribeToPush}
-              disabled={isLoading || status.permission === 'denied'}
-              className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-            >
-              {isLoading ? (
-                <>
-                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+            <>
+              {isMacOSSafari ? (
+                <div className="w-full py-3 px-4 bg-red-600/20 border border-red-600/30 rounded-lg text-center">
+                  <p className="text-sm text-red-400 font-medium">Not Supported on macOS Safari</p>
+                  <p className="text-xs text-gray-400 mt-1">Please use Chrome, Edge, or Firefox</p>
+                </div>
+              ) : !isPushSupported ? (
+                <div className="w-full py-3 px-4 bg-yellow-600/20 border border-yellow-600/30 rounded-lg text-center">
+                  <p className="text-sm text-yellow-400 font-medium">Push Not Supported</p>
+                  <p className="text-xs text-gray-400 mt-1">Your browser doesn't support push notifications</p>
+                </div>
+              ) : (
+                <button
+                  onClick={subscribeToPush}
+                  disabled={isLoading || status.permission === 'denied'}
+                  className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  {isLoading ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
@@ -316,7 +342,9 @@ export default function PushNotificationManager() {
                   Enable Notifications
                 </>
               )}
-            </button>
+                </button>
+              )}
+            </>
           ) : (
             <div className="space-y-3">
               <button
