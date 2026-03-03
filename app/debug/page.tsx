@@ -122,7 +122,7 @@ export default function DebugPage() {
         return outputArray;
       };
 
-      const convertedVapidKey = urlBase64ToUint8Array(vapidPublicKey);
+      const convertedVapidKey = urlBase64ToUint8Array(vapidPublicKey) as BufferSource;
 
       // Subscribe
       console.log('[Debug] Subscribing to push...');

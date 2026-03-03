@@ -130,7 +130,7 @@ export default function PushNotificationManager() {
         throw new Error('VAPID public key is not configured');
       }
 
-      const convertedVapidKey = urlBase64ToUint8Array(vapidPublicKey);
+      const convertedVapidKey = urlBase64ToUint8Array(vapidPublicKey) as BufferSource;
 
       // Subscribe to push
       const subscription = await registration.pushManager.subscribe({
