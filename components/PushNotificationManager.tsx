@@ -26,71 +26,75 @@ export default function PushNotificationManager() {
   const [error, setError] = useState<string | null>(null);
   const [lastNotification, setLastNotification] = useState<Date | null>(null);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [subscriptionValid, setSubscriptionValid] = useState(false);
   const [isMacOSSafari, setIsMacOSSafari] = useState(false);
   const [isPushSupported, setIsPushSupported] = useState(true);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Check initial subscription status and platform
+  // Check subscription status on mount and periodically
+  const checkSubscriptionStatus = useCallback(async () => {
+    try {
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        const registration = await navigator.serviceWorker.getRegistration();
+        if (registration) {
+          const subscription = await registration.pushManager.getSubscription();
+          const isSubscribed = !!subscription;
+
+          setStatus(prev => ({
+            ...prev,
+            subscribed: isSubscribed,
+            permission: Notification.permission,
+          }));
+
+          // Verify subscription with server
+          if (isSubscribed) {
+            try {
+              const response = await fetch('/api/subscribe');
+              if (response.ok) {
+                const data = await response.json();
+                const serverHasSubscription = data.subscriptionCount > 0;
+                setSubscriptionValid(serverHasSubscription);
+
+                // If server doesn't have the subscription, resubscribe
+                if (!serverHasSubscription) {
+                  console.log('[PushManager] Subscription lost on server, resubscribing...');
+                  await subscribeToPush();
+                  return;
+                }
+              }
+            } catch (e) {
+              console.error('[PushManager] Error checking server subscription:', e);
+            }
+          } else {
+            setSubscriptionValid(false);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[PushManager] Error checking subscription:', err);
+    }
+  }, []);
+
+  // Initial check and periodic verification
   useEffect(() => {
-    // Detect macOS Safari
-    const isMacOS = /Macintosh|MacIntel|MacPPC|Mac68K/.test(navigator.userAgent);
-    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-    const isIOSSafari = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    const isMacOSSafariBrowser = isMacOS && isSafari && !isIOSSafari;
-
-    setIsMacOSSafari(isMacOSSafariBrowser);
-
-    // Check if push is supported
-    const supported = 'serviceWorker' in navigator && 'PushManager' in window && Notification.permission !== 'denied';
-    setIsPushSupported(supported);
-
     checkSubscriptionStatus();
 
-    // Listen for permission changes
-    if ('permissions' in navigator) {
-      navigator.permissions.query({ name: 'notifications' as PermissionName }).then((permissionStatus) => {
-        permissionStatus.onchange = () => {
-          setStatus(prev => ({ ...prev, permission: Notification.permission }));
-        };
-      }).catch(() => {
-        // Ignore errors for permissions API
-      });
-    }
+    // Check every 30 seconds to detect lost subscriptions
+    const interval = setInterval(checkSubscriptionStatus, 30000);
 
     return () => {
+      clearInterval(interval);
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
     };
-  }, []);
-
-  const checkSubscriptionStatus = async () => {
-    try {
-      if ('serviceWorker' in navigator && 'pushManager' in navigator) {
-        const registration = await navigator.serviceWorker.getRegistration();
-        if (registration) {
-          const subscription = await registration.pushManager.getSubscription();
-          setStatus(prev => ({
-            ...prev,
-            subscribed: !!subscription,
-            permission: Notification.permission,
-          }));
-        }
-      }
-    } catch (err) {
-      console.error('Error checking subscription:', err);
-    }
-  };
+  }, [checkSubscriptionStatus]);
 
   const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding)
-      .replace(/-/g, '+')
-      .replace(/_/g, '/');
-
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
     const rawData = window.atob(base64);
     const outputArray = new Uint8Array(rawData.length);
-
     for (let i = 0; i < rawData.length; ++i) {
       outputArray[i] = rawData.charCodeAt(i);
     }
@@ -117,14 +121,10 @@ export default function PushNotificationManager() {
       }
 
       // Register service worker
-      const registration = await navigator.serviceWorker.register('/sw.js', {
-        scope: '/',
-      });
-
-      // Wait for service worker to be ready
+      const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
       await navigator.serviceWorker.ready;
 
-      // Convert VAPID key
+      // Get VAPID key
       const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
       if (!vapidPublicKey) {
         throw new Error('VAPID public key is not configured');
@@ -148,14 +148,19 @@ export default function PushNotificationManager() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to register subscription on server');
+        const errorText = await response.text();
+        throw new Error(`Failed to register subscription on server: ${errorText}`);
       }
+
+      const result = await response.json();
+      console.log('[PushManager] Subscription successful:', result);
 
       setStatus({
         subscribed: true,
         permission: 'granted',
         intervalId: null,
       });
+      setSubscriptionValid(true);
 
       // Start polling for notifications every 10 seconds
       startNotificationPolling();
@@ -167,56 +172,27 @@ export default function PushNotificationManager() {
     }
   };
 
-  const unsubscribeFromPush = async () => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      // Stop polling
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-
-      const registration = await navigator.serviceWorker.getRegistration();
-      if (registration) {
-        const subscription = await registration.pushManager.getSubscription();
-        if (subscription) {
-          // Unsubscribe from server
-          await fetch('/api/unsubscribe', {
-            method: 'DELETE',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ endpoint: subscription.endpoint }),
-          });
-
-          // Unsubscribe locally
-          await subscription.unsubscribe();
-        }
-      }
-
-      setStatus({
-        subscribed: false,
-        permission: Notification.permission,
-        intervalId: null,
-      });
-
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to unsubscribe');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const startNotificationPolling = () => {
-    // Poll every 10 seconds to trigger notifications
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
     }
 
     intervalRef.current = setInterval(async () => {
       try {
+        // First verify we're still subscribed on the server
+        const checkResponse = await fetch('/api/subscribe');
+        if (checkResponse.ok) {
+          const data = await checkResponse.json();
+          if (data.subscriptionCount === 0) {
+            console.log('[PushManager] Subscription lost on server, stopping polling');
+            clearInterval(intervalRef.current!);
+            intervalRef.current = null;
+            setStatus(prev => ({ ...prev, subscribed: false }));
+            setSubscriptionValid(false);
+            return;
+          }
+        }
+
         const response = await fetch('/api/send-broadcast', {
           method: 'POST',
           headers: {
@@ -226,13 +202,19 @@ export default function PushNotificationManager() {
 
         if (response.ok) {
           const data = await response.json();
-          setLastNotification(new Date());
-          setNotificationCount(prev => prev + 1);
+          if (data.stats.sent > 0) {
+            setLastNotification(new Date());
+            setNotificationCount(prev => prev + 1);
+          } else if (data.stats.total === 0) {
+            console.warn('[PushManager] No subscribers on server, subscription may be lost');
+            setStatus(prev => ({ ...prev, subscribed: false }));
+            setSubscriptionValid(false);
+          }
         }
       } catch (err) {
-        console.error('Error sending notification:', err);
+        console.error('[PushManager] Error sending notification:', err);
       }
-    }, 10000); // 10 seconds
+    }, 10000);
   };
 
   const triggerTestNotification = async () => {
@@ -240,6 +222,30 @@ export default function PushNotificationManager() {
     setError(null);
 
     try {
+      // First check if we have a valid subscription
+      if (!subscriptionValid) {
+        await checkSubscriptionStatus();
+
+        // If still not valid, show error
+        const registration = await navigator.serviceWorker.getRegistration();
+        const subscription = registration ? await registration.pushManager.getSubscription() : null;
+
+        if (!subscription) {
+          throw new Error('Not subscribed. Please click "Enable Notifications" first.');
+        }
+
+        // Re-register with server
+        const response = await fetch('/api/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(subscription),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to re-register subscription');
+        }
+      }
+
       const response = await fetch('/api/trigger', {
         method: 'POST',
         headers: {
@@ -249,6 +255,13 @@ export default function PushNotificationManager() {
 
       if (!response.ok) {
         throw new Error('Failed to trigger notification');
+      }
+
+      const result = await response.json();
+      console.log('[PushManager] Trigger result:', result);
+
+      if (result.stats?.sent === 0) {
+        throw new Error('Notification sent but not delivered. Your subscription may have been lost. Please re-subscribe.');
       }
 
       setLastNotification(new Date());
@@ -261,11 +274,58 @@ export default function PushNotificationManager() {
     }
   };
 
+  const unsubscribeFromPush = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (registration) {
+        const subscription = await registration.pushManager.getSubscription();
+        if (subscription) {
+          await fetch('/api/unsubscribe', {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ endpoint: subscription.endpoint }),
+          });
+
+          await subscription.unsubscribe();
+        }
+      }
+
+      setStatus({
+        subscribed: false,
+        permission: Notification.permission,
+        intervalId: null,
+      });
+      setSubscriptionValid(false);
+
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to unsubscribe');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Status Card */}
       <div className="bg-white/5 backdrop-blur border border-white/10 rounded-xl p-6 space-y-4">
         <h2 className="text-xl font-semibold">Push Notifications</h2>
+
+        {/* Subscription Status Warning */}
+        {status.subscribed && !subscriptionValid && (
+          <div className="bg-yellow-600/20 border border-yellow-600/30 rounded-lg p-3 text-sm">
+            <p className="text-yellow-400 font-medium">⚠️ Subscription may be out of sync. Try re-subscribing.</p>
+          </div>
+        )}
 
         {/* Permission Status */}
         <div className="space-y-2">
@@ -329,19 +389,19 @@ export default function PushNotificationManager() {
                   {isLoading ? (
                     <>
                       <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Subscribing...
-                </>
-              ) : (
-                <>
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                  </svg>
-                  Enable Notifications
-                </>
-              )}
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Subscribing...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                      </svg>
+                      Enable Notifications
+                    </>
+                  )}
                 </button>
               )}
             </>
@@ -407,7 +467,7 @@ export default function PushNotificationManager() {
         {status.subscribed && (
           <div className="bg-green-500/20 border border-green-500/30 rounded-lg p-3 text-sm text-green-400 flex items-center gap-2">
             <svg className="w-4 h-4 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" />
+              <path d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0 1 0 0 2z" />
             </svg>
             Auto-notifications every 10 seconds
           </div>
