@@ -156,6 +156,16 @@ export default function Home() {
           {isMacOS && !isMacOSSafari && <span>macOS detected (using compatible browser)</span>}
           {!isIOS && !isAndroid && !isMacOS && <span>Desktop detected</span>}
         </div>
+
+        {/* Debug Link */}
+        <div className="text-center">
+          <a
+            href="/debug"
+            className="text-xs text-gray-500 hover:text-gray-400 underline"
+          >
+            Debug Console
+          </a>
+        </div>
       </div>
     </main>
   );
